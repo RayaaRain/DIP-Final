@@ -102,9 +102,14 @@ def curvature_prediction(grad, starting_point, starting_direction):
     i,j = starting_point
     
     while i >= 1 and i < grad.shape[0]-1 and j >= 1 and j < grad.shape[1]-1:
-        if (i,j) in segment_map:
-            break
-        segment_map[(i,j)] = 1
+        # Loop detection
+        if (i,j) not in segment_map:
+            segment_map[(i,j)] = [cur_direction]
+        else:
+            if cur_direction in segment_map[(i,j)]:
+                break
+            else:
+                segment_map[(i,j)].append(cur_direction)
         edge_points.append((i,j))
         if cur_direction == DIRECTION.RIGHT:
             next = np.argmax(np.array([grad[i-1,j+1],grad[i,j+1],grad[i+1,j+1]]))
