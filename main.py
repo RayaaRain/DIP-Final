@@ -41,6 +41,10 @@ def parse_args():
     parser.add_argument('--output_path',default="./OutputImages",type=str)
     return parser.parse_args()
 
+def GausBlur(image):
+    gFilter = np.array([[1, 4, 7, 4, 1], [4, 16, 26, 16, 4], [7, 26, 41, 26, 7], [4, 16, 26, 16, 4], [1, 4, 7, 4, 1]]) / 273
+    return cv2.filter2D(image, -1, gFilter)
+
 def entropy_2d(image):
     entropy = 0
     kernel = np.ones((11,11), dtype = np.float32) / 121
@@ -54,6 +58,9 @@ def entropy_2d(image):
         for j in range(256):
             entropy += prob[i,j] * np.log(prob[i,j] + 1e-10)
     return -entropy
+
+def getResoluLv(g):
+    return g
 
 def compute_gradient_orientation(grad_x,grad_y):
     orientation = np.zeros(grad_x.shape)
@@ -239,29 +246,38 @@ def edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save
         
 
 def main():
-    args = parse_args()
+    # args = parse_args()
     
-    if(args.input_path == None):
-        print("Please provide input path")
-        return
+    # if(args.input_path == None):
+    #     print("Please provide input path")
+    #     return
     
-    os.makedirs(args.output_path, exist_ok=True)
+    # os.makedirs(args.output_path, exist_ok=True)
     np.random.seed(0)
     
-    sample = cv2.imread(args.input_path, cv2.IMREAD_GRAYSCALE)
+    sample = cv2.imread("./SampleImages/lena.png", cv2.IMREAD_GRAYSCALE)
+    
     # compute entropy and thresholding
-    entropy = entropy_2d(sample)
+    # entropy = entropy_2d(sample)
+    # print(entropy)
     ## TODO: implement threshold
-    threshold_high = sample.shape[0] * sample.shape[1] * 0.25
+    threshold_high = 0.043
+    # if (entropy > 12.7) : threshold_high = 0.087
+    # elif (entropy >= 10.8) : threshold_high = 0.065
     # compute gradient and orientation, then find anchor points
-    grad_x = cv2.Sobel(sample, -1, 1, 0, ksize=3)
-    grad_y = cv2.Sobel(sample, -1, 0, 1, ksize=3)
+    grad_x = cv2.Sobel(sample, cv2.CV_64F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(sample, cv2.CV_64F, 0, 1, ksize=3)
+    cv2.normalize(grad_x, grad_x, -255, 255, cv2.NORM_MINMAX)
+    cv2.normalize(grad_y, grad_y, -255, 255, cv2.NORM_MINMAX)
+    print(np.max(grad_x), np.max(grad_y))
+    print(np.min(grad_x), np.min(grad_y))
     grad = (np.abs(grad_x) + np.abs(grad_y))/2 
     orientation = compute_gradient_orientation(grad_x, grad_y)
     anchors = find_anchor(grad, orientation)
     # find edge points
-    edge_map = edge_linking(grad, orientation, anchors, 20, threshold_high, save_partial=True, save_path=args.output_path)
-    cv2.imwrite(os.path.join(args.output_path, "edge_map.png"), edge_map)
+    edge_map = edge_linking(grad, orientation, anchors, 20, threshold_high, save_partial=True, save_path="./OutputImages")
+    cv2.imwrite(os.path.join("./OutputImages", "edge_map.png"), edge_map)
+    
 
 if __name__ == "__main__":
     main()
