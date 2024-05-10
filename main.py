@@ -2,6 +2,7 @@ import os
 import argparse
 import cv2
 import numpy as np
+import threading
 
 TAN67_5 = np.tan(np.deg2rad(67.5))
 TAN22_5 = np.tan(np.deg2rad(22.5))
@@ -30,13 +31,13 @@ class DIRECTION:
             return DIRECTION.UP_RIGHT, DIRECTION.DOWN_LEFT
         if direction == DIRECTION.UP_RIGHT or direction == DIRECTION.DOWN_LEFT:
             return DIRECTION.DOWN_RIGHT, DIRECTION.UP_LEFT
-        return DIRECTION.NONE
+        return DIRECTION.NONE, DIRECTION.NONE
     
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_path',default="./SampleImages",type=str)
+    parser.add_argument('--input_path')
     parser.add_argument('--output_path',default="./OutputImages",type=str)
     return parser.parse_args()
 
@@ -74,18 +75,19 @@ def find_anchor(grad, orientation):
     '''
     anchors = {}
     for i,j in np.ndindex(grad.shape):
-        if orientation[i,j] == DIRECTION.RIGHT or orientation[i,j] == DIRECTION.LEFT:
-            if grad[i,j] > grad[i,j-1] and grad[i,j] > grad[i,j+1]:
-                anchors[(i,j)] = grad[i,j]
-        if orientation[i,j] == DIRECTION.DOWN or orientation[i,j] == DIRECTION.UP:
-            if grad[i,j] > grad[i-1,j] and grad[i,j] > grad[i+1,j]:
-                anchors[(i,j)] = grad[i,j]
-        if orientation[i,j] == DIRECTION.UP_LEFT or orientation[i,j] == DIRECTION.DOWN_RIGHT:
-            if grad[i,j] > grad[i-1,j-1] and grad[i,j] > grad[i+1,j+1]:
-                anchors[(i,j)] = grad[i,j]
-        if orientation[i,j] == DIRECTION.UP_RIGHT or orientation[i,j] == DIRECTION.DOWN_LEFT:
-            if grad[i,j] > grad[i-1,j+1] and grad[i,j] > grad[i+1,j-1]:
-                anchors[(i,j)] = grad[i,j]
+        if i >= 1 and i < grad.shape[0]-1 and j >= 1 and j < grad.shape[1]-1:
+            if orientation[i,j] == DIRECTION.RIGHT or orientation[i,j] == DIRECTION.LEFT:
+                if grad[i,j] > grad[i,j-1] and grad[i,j] > grad[i,j+1]:
+                    anchors[(i,j)] = grad[i,j]
+            if orientation[i,j] == DIRECTION.DOWN or orientation[i,j] == DIRECTION.UP:
+                if grad[i,j] > grad[i-1,j] and grad[i,j] > grad[i+1,j]:
+                    anchors[(i,j)] = grad[i,j]
+            if orientation[i,j] == DIRECTION.UP_LEFT or orientation[i,j] == DIRECTION.DOWN_RIGHT:
+                if grad[i,j] > grad[i-1,j-1] and grad[i,j] > grad[i+1,j+1]:
+                    anchors[(i,j)] = grad[i,j]
+            if orientation[i,j] == DIRECTION.UP_RIGHT or orientation[i,j] == DIRECTION.DOWN_LEFT:
+                if grad[i,j] > grad[i-1,j+1] and grad[i,j] > grad[i+1,j-1]:
+                    anchors[(i,j)] = grad[i,j]
     # sort the anchors by gradient value from large to small
     anchors = dict(sorted(anchors.items(), key=lambda x: x[1], reverse=True))
     return list(anchors.keys())       
@@ -94,14 +96,127 @@ def curvature_prediction(grad, starting_point, starting_direction):
     '''
     Return a segement list of edge points
     '''
+    edge_points = []
+    segment_map = {}
     cur_direction = starting_direction
-    cur_point = starting_point
+    i,j = starting_point
+    
+    while i >= 1 and i < grad.shape[0]-1 and j >= 1 and j < grad.shape[1]-1:
+        if (i,j) in segment_map:
+            break
+        segment_map[(i,j)] = 1
+        edge_points.append((i,j))
+        if cur_direction == DIRECTION.RIGHT:
+            next = np.argmax(np.array([grad[i-1,j+1],grad[i,j+1],grad[i+1,j+1]]))
+            if next == 0:
+                cur_direction = DIRECTION.UP_RIGHT
+                i -= 1
+                j += 1
+            elif next == 1:
+                cur_direction = DIRECTION.RIGHT
+                j += 1
+            else:
+                cur_direction = DIRECTION.DOWN_RIGHT
+                i += 1
+                j += 1
+        elif cur_direction == DIRECTION.LEFT:
+            next = np.argmax(np.array([grad[i-1,j-1],grad[i,j-1],grad[i+1,j-1]]))
+            if next == 0:
+                cur_direction = DIRECTION.UP_LEFT
+                i -= 1
+                j -= 1
+            elif next == 1:
+                cur_direction = DIRECTION.LEFT
+                j -= 1
+            else:
+                cur_direction = DIRECTION.DOWN_LEFT
+                i += 1
+                j -= 1
+        elif cur_direction == DIRECTION.UP:
+            next = np.argmax(np.array([grad[i-1,j-1],grad[i-1,j],grad[i-1,j+1]]))
+            if next == 0:
+                cur_direction = DIRECTION.UP_LEFT
+                i -= 1
+                j -= 1
+            elif next == 1:
+                cur_direction = DIRECTION.UP
+                i -= 1
+            else:
+                cur_direction = DIRECTION.UP_RIGHT
+                i -= 1
+                j += 1
+        elif cur_direction == DIRECTION.DOWN:
+            next = np.argmax(np.array([grad[i+1,j-1],grad[i+1,j],grad[i+1,j+1]]))
+            if next == 0:
+                cur_direction = DIRECTION.DOWN_LEFT
+                i += 1
+                j -= 1
+            elif next == 1:
+                cur_direction = DIRECTION.DOWN
+                i += 1
+            else:
+                cur_direction = DIRECTION.DOWN_RIGHT
+                i += 1
+                j += 1
+        elif cur_direction == DIRECTION.UP_RIGHT:
+            next = np.argmax(np.array([grad[i-1,j],grad[i-1,j+1],grad[i,j+1]]))
+            if next == 0:
+                cur_direction = DIRECTION.UP
+                i -= 1
+            elif next == 1:
+                cur_direction = DIRECTION.UP_RIGHT
+                i -= 1
+                j += 1
+            else:
+                cur_direction = DIRECTION.RIGHT
+                j += 1
+        elif cur_direction == DIRECTION.DOWN_RIGHT:
+            next = np.argmax(np.array([grad[i,j+1],grad[i+1,j+1],grad[i+1,j]]))
+            if next == 0:
+                cur_direction = DIRECTION.RIGHT
+                j += 1
+            elif next == 1:
+                cur_direction = DIRECTION.DOWN_RIGHT
+                i += 1
+                j += 1
+            else:
+                cur_direction = DIRECTION.DOWN
+                i += 1
+        elif cur_direction == DIRECTION.UP_LEFT:
+            next = np.argmax(np.array([grad[i-1,j],grad[i-1,j-1],grad[i,j-1]]))
+            if next == 0:
+                cur_direction = DIRECTION.UP
+                i -= 1
+            elif next == 1:
+                cur_direction = DIRECTION.UP_LEFT
+                i -= 1
+                j -= 1
+            else:
+                cur_direction = DIRECTION.LEFT
+                j -= 1
+        elif cur_direction == DIRECTION.DOWN_LEFT:
+            next = np.argmax(np.array([grad[i,j-1],grad[i+1,j-1],grad[i+1,j]]))
+            if next == 0:
+                cur_direction = DIRECTION.LEFT
+                j -= 1
+            elif next == 1:
+                cur_direction = DIRECTION.DOWN_LEFT
+                i += 1
+                j -= 1
+            else:
+                cur_direction = DIRECTION.DOWN
+                i += 1
+    edge_points.append((i,j)) # Add the boundary point
+    
+    return edge_points
 
-def edge_linking(grad, orientation, anchors, threshold_low, threshold_high):
+def edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save_partial, save_path):
     edge_map = np.zeros(grad.shape, dtype = np.uint8)
     edge_count = 0
     for anchor in anchors:
         i,j = anchor
+        if(edge_map[i,j] == 255):
+            continue
         s1_dir, s2_dir = DIRECTION.get_perpendicular_direction(orientation[i,j])
         s1 = curvature_prediction(grad, (i,j), s1_dir)
         s2 = curvature_prediction(grad, (i,j), s2_dir)
@@ -113,18 +228,26 @@ def edge_linking(grad, orientation, anchors, threshold_low, threshold_high):
             edge_count += 1
         if edge_count > threshold_high:
             break
+        if save_partial:
+            cv2.imwrite(os.path.join(save_path, "edge_map.png"), edge_map)
     return edge_map
         
 
 def main():
     args = parse_args()
     
+    if(args.input_path == None):
+        print("Please provide input path")
+        return
+    
     os.makedirs(args.output_path, exist_ok=True)
     np.random.seed(0)
     
-    sample = cv2.imread(os.path.join(args.input_path, "lena.png"), cv2.IMREAD_GRAYSCALE)
+    sample = cv2.imread(args.input_path, cv2.IMREAD_GRAYSCALE)
     # compute entropy and thresholding
     entropy = entropy_2d(sample)
+    ## TODO: implement threshold
+    threshold_high = sample.shape[0] * sample.shape[1] * 0.25
     # compute gradient and orientation, then find anchor points
     grad_x = cv2.Sobel(sample, -1, 1, 0, ksize=3)
     grad_y = cv2.Sobel(sample, -1, 0, 1, ksize=3)
@@ -132,7 +255,8 @@ def main():
     orientation = compute_gradient_orientation(grad_x, grad_y)
     anchors = find_anchor(grad, orientation)
     # find edge points
-    edge_map = edge_linking(grad, orientation, anchors, 0.1, 0.2)
+    edge_map = edge_linking(grad, orientation, anchors, 20, threshold_high, save_partial=True, save_path=args.output_path)
+    cv2.imwrite(os.path.join(args.output_path, "edge_map.png"), edge_map)
 
 if __name__ == "__main__":
     main()
