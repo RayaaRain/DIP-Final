@@ -41,6 +41,10 @@ def parse_args():
     parser.add_argument('--output_path',default="./OutputImages",type=str)
     return parser.parse_args()
 
+def GausBlur(image):
+    gFilter = np.array([[1, 4, 7, 4, 1], [4, 16, 26, 16, 4], [7, 26, 41, 26, 7], [4, 16, 26, 16, 4], [1, 4, 7, 4, 1]]) / 273
+    return cv2.filter2D(image, -1, gFilter)
+
 def entropy_2d(image):
     entropy = 0
     kernel = np.ones((11,11), dtype = np.float32) / 121
@@ -54,6 +58,20 @@ def entropy_2d(image):
         for j in range(256):
             entropy += prob[i,j] * np.log(prob[i,j] + 1e-10)
     return -entropy
+
+def getResoluLv(g):
+    if (g >= 192): return g/64 - 1
+    elif (g >= 64): return g/128 + 0.5
+    elif (g >= 32): return 3 - g/32
+    else: return 6 - g/8
+
+def gradFiltering(image):
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            if (getResoluLv(image[i, j]) > 2):
+                image[i, j] = 0
+    return image
+    
 
 def compute_gradient_orientation(grad_x,grad_y):
     orientation = np.zeros(grad_x.shape)
@@ -92,7 +110,7 @@ def find_anchor(grad, orientation):
     anchors = dict(sorted(anchors.items(), key=lambda x: x[1], reverse=True))
     return list(anchors.keys())       
 
-def curvature_prediction(grad, starting_point, starting_direction):
+def curvature_prediction(grad, starting_point, starting_direction, all_anchors):
     '''
     Return a segement list of edge points
     '''
@@ -103,6 +121,8 @@ def curvature_prediction(grad, starting_point, starting_direction):
     
     while i >= 1 and i < grad.shape[0]-1 and j >= 1 and j < grad.shape[1]-1:
         # Loop detection
+        if ((i,j) not in all_anchors) :
+            break
         if (i,j) not in segment_map:
             segment_map[(i,j)] = [cur_direction]
             edge_points.append((i,j))
@@ -111,6 +131,7 @@ def curvature_prediction(grad, starting_point, starting_direction):
                 break
             else:
                 segment_map[(i,j)].append(cur_direction)
+        
         if cur_direction == DIRECTION.RIGHT:
             next = np.argmax(np.array([grad[i-1,j+1],grad[i,j+1],grad[i+1,j+1]]))
             if next == 0:
@@ -211,7 +232,7 @@ def curvature_prediction(grad, starting_point, starting_direction):
             else:
                 cur_direction = DIRECTION.DOWN
                 i += 1
-    edge_points.append((i,j)) # Add the boundary point
+    if ((i,j) in all_anchors) : edge_points.append((i,j)) # Add the boundary point
     
     return edge_points
 
@@ -223,8 +244,8 @@ def edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save
         if(edge_map[i,j] == 255):
             continue
         s1_dir, s2_dir = DIRECTION.get_perpendicular_direction(orientation[i,j])
-        s1 = curvature_prediction(grad, (i,j), s1_dir)
-        s2 = curvature_prediction(grad, (i,j), s2_dir)
+        s1 = curvature_prediction(grad, (i,j), s1_dir, anchors)
+        s2 = curvature_prediction(grad, (i,j), s2_dir, anchors)
         if len(s1) + len(s2) < threshold_low:
             continue
         s = s1 + s2
@@ -239,30 +260,40 @@ def edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save
         
 
 def main():
-    args = parse_args()
+    # args = parse_args()
     
-    if(args.input_path == None):
-        print("Please provide input path")
-        return
+    # if(args.input_path == None):
+    #     print("Please provide input path")
+    #     return
     
-    os.makedirs(args.output_path, exist_ok=True)
+    # os.makedirs(args.output_path, exist_ok=True)
     np.random.seed(0)
     
-    sample = cv2.imread(args.input_path, cv2.IMREAD_GRAYSCALE)
+    sample = GausBlur(cv2.imread("./SampleImages/lena.png", cv2.IMREAD_GRAYSCALE))
+    
     # compute entropy and thresholding
     entropy = entropy_2d(sample)
     ## TODO: implement threshold
-    threshold_low = 5
-    threshold_high = sample.shape[0] * sample.shape[1] * 0.25
+    threshold_high = 0.043 * sample.shape[0] * sample.shape[1]
+    if (entropy > 12.7) : threshold_high = 0.087 * sample.shape[0] * sample.shape[1]
+    elif (entropy >= 10.8) : threshold_high = 0.065 * sample.shape[0] * sample.shape[1]
     # compute gradient and orientation, then find anchor points
-    grad_x = cv2.Sobel(sample, -1, 1, 0, ksize=3)
-    grad_y = cv2.Sobel(sample, -1, 0, 1, ksize=3)
-    grad = (np.abs(grad_x) + np.abs(grad_y))/2 
+    grad_x = cv2.Sobel(sample, cv2.CV_64F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(sample, cv2.CV_64F, 0, 1, ksize=3)
+    cv2.normalize(grad_x, grad_x, -255, 255, cv2.NORM_MINMAX)
+    cv2.normalize(grad_y, grad_y, -255, 255, cv2.NORM_MINMAX)
+    grad = gradFiltering((np.abs(grad_x) + np.abs(grad_y))/2)
+    # cv2.imwrite(os.path.join("./OutputImages", "grad.png"), grad)
     orientation = compute_gradient_orientation(grad_x, grad_y)
     anchors = find_anchor(grad, orientation)
+    # blank = np.zeros(grad.shape, dtype = np.uint8)
+    # for ac in anchors:
+    #     blank[ac[0], ac[1]] = 255
+    # cv2.imwrite(os.path.join("./OutputImages", "anchor.png"), blank)
     # find edge points
-    edge_map = edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save_partial=True, save_path=args.output_path)
-    cv2.imwrite(os.path.join(args.output_path, "edge_map.png"), edge_map)
+    edge_map = edge_linking(grad, orientation, anchors, 20, threshold_high, save_partial=True, save_path="./OutputImages")
+    cv2.imwrite(os.path.join("./OutputImages", "edge_map.png"), edge_map)
+    
 
 if __name__ == "__main__":
     main()
