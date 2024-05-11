@@ -37,8 +37,12 @@ class DIRECTION:
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_path')
-    parser.add_argument('--output_path',default="./OutputImages",type=str)
+    parser.add_argument('--input_path', default="./SampleImages/lena.png", type=str)
+    parser.add_argument('--output_path',default="./OutputImages/edge_map.png",type=str)
+    parser.add_argument('-tl', '--threshold_low', default=8, type=int)
+    parser.add_argument('-th', '--threshold_high', default=None, type=float)
+    parser.add_argument('--save_partial', action='store_true')
+    parser.add_argument('--save_anchor', action='store_true')
     return parser.parse_args()
 
 def GausBlur(image):
@@ -248,28 +252,25 @@ def edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save
         s2 = curvature_prediction(grad, (i,j), s2_dir, anchors)
         if len(s1) + len(s2) < threshold_low:
             continue
-        s = s1 + s2
+        s = set(s1 + s2)
         for p in s:
             edge_map[p] = 255
             edge_count += 1
         if edge_count > threshold_high:
             break
         if save_partial:
-            cv2.imwrite(os.path.join(save_path, "edge_map.png"), edge_map)
+            cv2.imwrite(save_path, edge_map)
     return edge_map
         
 
 def main():
-    # args = parse_args()
-    
-    # if(args.input_path == None):
-    #     print("Please provide input path")
-    #     return
-    
-    # os.makedirs(args.output_path, exist_ok=True)
     np.random.seed(0)
+    args = parse_args()
     
-    sample = GausBlur(cv2.imread("./SampleImages/lena.png", cv2.IMREAD_GRAYSCALE))
+    output_folder, _= os.path.split(args.output_path)
+    os.makedirs(output_folder, exist_ok=True)
+    
+    sample = GausBlur(cv2.imread(args.input_path, cv2.IMREAD_GRAYSCALE))
     
     # compute entropy and thresholding
     entropy = entropy_2d(sample)
@@ -277,22 +278,24 @@ def main():
     threshold_high = 0.043 * sample.shape[0] * sample.shape[1]
     if (entropy > 12.7) : threshold_high = 0.087 * sample.shape[0] * sample.shape[1]
     elif (entropy >= 10.8) : threshold_high = 0.065 * sample.shape[0] * sample.shape[1]
+    if(args.threshold_high != None): threshold_high = args.threshold_high * sample.shape[0] * sample.shape[1]
     # compute gradient and orientation, then find anchor points
     grad_x = cv2.Sobel(sample, cv2.CV_64F, 1, 0, ksize=3)
     grad_y = cv2.Sobel(sample, cv2.CV_64F, 0, 1, ksize=3)
     cv2.normalize(grad_x, grad_x, -255, 255, cv2.NORM_MINMAX)
     cv2.normalize(grad_y, grad_y, -255, 255, cv2.NORM_MINMAX)
     grad = gradFiltering((np.abs(grad_x) + np.abs(grad_y))/2)
-    # cv2.imwrite(os.path.join("./OutputImages", "grad.png"), grad)
+    # cv2.imwrite(os.path.join(output_folder, "grad.png"), grad)
     orientation = compute_gradient_orientation(grad_x, grad_y)
     anchors = find_anchor(grad, orientation)
-    # blank = np.zeros(grad.shape, dtype = np.uint8)
-    # for ac in anchors:
-    #     blank[ac[0], ac[1]] = 255
-    # cv2.imwrite(os.path.join("./OutputImages", "anchor.png"), blank)
+    if args.save_anchor:
+        blank = np.zeros(grad.shape, dtype = np.uint8)
+        for ac in anchors:
+            blank[ac[0], ac[1]] = 255
+        cv2.imwrite(os.path.join(output_folder, "anchor.png"), blank)
     # find edge points
-    edge_map = edge_linking(grad, orientation, anchors, 20, threshold_high, save_partial=True, save_path="./OutputImages")
-    cv2.imwrite(os.path.join("./OutputImages", "edge_map.png"), edge_map)
+    edge_map = edge_linking(grad, orientation, anchors, args.threshold_low, threshold_high, save_partial=args.save_partial, save_path=args.output_path)
+    cv2.imwrite(args.output_path, edge_map)
     
 
 if __name__ == "__main__":
