@@ -286,9 +286,9 @@ def main():
     # cv2.imwrite(os.path.join("./OutputImages", "grad.png"), grad)
     orientation = compute_gradient_orientation(grad_x, grad_y)
     anchors = find_anchor(grad, orientation)
-    blank = np.zeros(grad.shape, dtype = np.uint8)
-    for ac in anchors:
-        blank[ac[0], ac[1]] = 255
+    # blank = np.zeros(grad.shape, dtype = np.uint8)
+    # for ac in anchors:
+    #     blank[ac[0], ac[1]] = 255
     # cv2.imwrite(os.path.join("./OutputImages", "anchor.png"), blank)
     # find edge points
     edge_map = edge_linking(grad, orientation, anchors, 20, threshold_high, save_partial=True, save_path="./OutputImages")
