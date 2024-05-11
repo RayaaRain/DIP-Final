@@ -268,7 +268,7 @@ def main():
     # os.makedirs(args.output_path, exist_ok=True)
     np.random.seed(0)
     
-    sample = cv2.imread("./SampleImages/lena.png", cv2.IMREAD_GRAYSCALE)
+    sample = GausBlur(cv2.imread("./SampleImages/lena.png", cv2.IMREAD_GRAYSCALE))
     
     # compute entropy and thresholding
     entropy = entropy_2d(sample)
