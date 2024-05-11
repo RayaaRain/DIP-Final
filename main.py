@@ -105,12 +105,12 @@ def curvature_prediction(grad, starting_point, starting_direction):
         # Loop detection
         if (i,j) not in segment_map:
             segment_map[(i,j)] = [cur_direction]
+            edge_points.append((i,j))
         else:
             if cur_direction in segment_map[(i,j)]:
                 break
             else:
                 segment_map[(i,j)].append(cur_direction)
-        edge_points.append((i,j))
         if cur_direction == DIRECTION.RIGHT:
             next = np.argmax(np.array([grad[i-1,j+1],grad[i,j+1],grad[i+1,j+1]]))
             if next == 0:
@@ -252,6 +252,7 @@ def main():
     # compute entropy and thresholding
     entropy = entropy_2d(sample)
     ## TODO: implement threshold
+    threshold_low = 5
     threshold_high = sample.shape[0] * sample.shape[1] * 0.25
     # compute gradient and orientation, then find anchor points
     grad_x = cv2.Sobel(sample, -1, 1, 0, ksize=3)
@@ -260,7 +261,7 @@ def main():
     orientation = compute_gradient_orientation(grad_x, grad_y)
     anchors = find_anchor(grad, orientation)
     # find edge points
-    edge_map = edge_linking(grad, orientation, anchors, 20, threshold_high, save_partial=True, save_path=args.output_path)
+    edge_map = edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save_partial=True, save_path=args.output_path)
     cv2.imwrite(os.path.join(args.output_path, "edge_map.png"), edge_map)
 
 if __name__ == "__main__":
