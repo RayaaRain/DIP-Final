@@ -32,8 +32,6 @@ class DIRECTION:
         if direction == DIRECTION.UP_RIGHT or direction == DIRECTION.DOWN_LEFT:
             return DIRECTION.DOWN_RIGHT, DIRECTION.UP_LEFT
         return DIRECTION.NONE, DIRECTION.NONE
-    
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -88,7 +86,6 @@ def compute_gradient_orientation(grad_x,grad_y):
     orientation[diagonal & (grad_x>0) & (grad_y<=0)] = DIRECTION.UP_RIGHT
     orientation[diagonal & (grad_x<=0) & (grad_y>0)] = DIRECTION.DOWN_LEFT
     orientation[diagonal & (grad_x<=0) & (grad_y<=0)] = DIRECTION.UP_LEFT
-    
     return orientation
 
 def find_anchor(grad, orientation):
@@ -254,6 +251,7 @@ def edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save
             continue
         s = set(s1 + s2)
         for p in s:
+            # anchors.remove(p)
             edge_map[p] = 255
             edge_count += 1
         if edge_count > threshold_high:
@@ -266,12 +264,10 @@ def edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save
 def main():
     np.random.seed(0)
     args = parse_args()
-    
     output_folder, _= os.path.split(args.output_path)
     os.makedirs(output_folder, exist_ok=True)
-    
+    fname = args.input_path.split('/')[-1]
     sample = GausBlur(cv2.imread(args.input_path, cv2.IMREAD_GRAYSCALE))
-    
     # compute entropy and thresholding
     entropy = entropy_2d(sample)
     ## TODO: implement threshold
@@ -284,18 +280,22 @@ def main():
     grad_y = cv2.Sobel(sample, cv2.CV_64F, 0, 1, ksize=3)
     cv2.normalize(grad_x, grad_x, -255, 255, cv2.NORM_MINMAX)
     cv2.normalize(grad_y, grad_y, -255, 255, cv2.NORM_MINMAX)
+    cv2.imwrite(os.path.join(output_folder, f"cannyGrad-{fname}"), np.sqrt(grad_x*grad_x + grad_y*grad_y))
+    cv2.imwrite(os.path.join(output_folder, f"orgGrad-{fname}"), (np.abs(grad_x) + np.abs(grad_y))/2)
     grad = gradFiltering((np.abs(grad_x) + np.abs(grad_y))/2)
-    # cv2.imwrite(os.path.join(output_folder, "grad.png"), grad)
+    cv2.imwrite(os.path.join(output_folder, f"filterGrad-{fname}"), grad)
     orientation = compute_gradient_orientation(grad_x, grad_y)
     anchors = find_anchor(grad, orientation)
     if args.save_anchor:
         blank = np.zeros(grad.shape, dtype = np.uint8)
         for ac in anchors:
             blank[ac[0], ac[1]] = 255
-        cv2.imwrite(os.path.join(output_folder, "anchor.png"), blank)
+        # cv2.imwrite(os.path.join(output_folder, "anchor.png"), blank)
+        cv2.imwrite(os.path.join(output_folder, f"anchor-{fname}"), blank)
     # find edge points
     edge_map = edge_linking(grad, orientation, anchors, args.threshold_low, threshold_high, save_partial=args.save_partial, save_path=args.output_path)
-    cv2.imwrite(args.output_path, edge_map)
+    # cv2.imwrite(args.output_path, edge_map)
+    cv2.imwrite(os.path.join(output_folder, f"edge_map-{fname}"), edge_map)
     
 
 if __name__ == "__main__":
