@@ -21,6 +21,11 @@ class DIRECTION:
     UP_RIGHT = 6
     DOWN_LEFT = 7
     UP_LEFT = 8
+    # Color Code
+    # Pink Red Orange
+    # Magenta White Yellow
+    # Blue Cyan Green
+    COLOR = [(255,255,255),(255,255,0),(255,0,255),(255,0,0),(0,255,255),(0,255,0),(255,127,0),(0,0,255),(255,0,127)]
     @staticmethod
     def get_perpendicular_direction(direction):
         if direction == DIRECTION.RIGHT or direction == DIRECTION.LEFT:
@@ -32,6 +37,14 @@ class DIRECTION:
         if direction == DIRECTION.UP_RIGHT or direction == DIRECTION.DOWN_LEFT:
             return DIRECTION.DOWN_RIGHT, DIRECTION.UP_LEFT
         return DIRECTION.NONE, DIRECTION.NONE
+    @staticmethod
+    def get_color_map_sample():
+        patch_size = 32
+        color_map = np.zeros((patch_size*3,patch_size*3,3), dtype = np.uint8)
+        color_seq = [DIRECTION.UP_LEFT, DIRECTION.UP, DIRECTION.UP_RIGHT, DIRECTION.LEFT, DIRECTION.NONE, DIRECTION.RIGHT, DIRECTION.DOWN_LEFT, DIRECTION.DOWN, DIRECTION.DOWN_RIGHT]
+        for i in range(9):
+            color_map[(i//3)*patch_size:(i//3+1)*patch_size, (i%3)*patch_size:(i%3+1)*patch_size] = DIRECTION.COLOR[color_seq[i]]
+        return cv2.cvtColor(color_map, cv2.COLOR_RGB2BGR)
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -40,7 +53,7 @@ def parse_args():
     parser.add_argument('-tl', '--threshold_low', default=8, type=int)
     parser.add_argument('-th', '--threshold_high', default=None, type=float)
     parser.add_argument('--save_partial', action='store_true')
-    parser.add_argument('--save_anchor', action='store_true')
+    parser.add_argument('--save_map', action='store_true')
     return parser.parse_args()
 
 def GausBlur(image):
@@ -242,8 +255,6 @@ def edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save
     edge_count = 0
     for anchor in anchors:
         i,j = anchor
-        if(edge_map[i,j] == 255):
-            continue
         s1_dir, s2_dir = DIRECTION.get_perpendicular_direction(orientation[i,j])
         s1 = curvature_prediction(grad, (i,j), s1_dir, anchors)
         s2 = curvature_prediction(grad, (i,j), s2_dir, anchors)
@@ -251,7 +262,8 @@ def edge_linking(grad, orientation, anchors, threshold_low, threshold_high, save
             continue
         s = set(s1 + s2)
         for p in s:
-            # anchors.remove(p)
+            if edge_map[p] == 255:
+                continue
             edge_map[p] = 255
             edge_count += 1
         if edge_count > threshold_high:
@@ -267,34 +279,43 @@ def main():
     output_folder, _= os.path.split(args.output_path)
     os.makedirs(output_folder, exist_ok=True)
     fname = args.input_path.split('/')[-1]
-    sample = GausBlur(cv2.imread(args.input_path, cv2.IMREAD_GRAYSCALE))
-    # compute entropy and thresholding
+    sample = cv2.imread(args.input_path, cv2.IMREAD_GRAYSCALE)
+    
+    ## Preprocessing
+    # sample = cv2.rotate(sample, cv2.ROTATE_90_CLOCKWISE)
+    # sample = GausBlur(cv2.imread(args.input_path, cv2.IMREAD_GRAYSCALE))
+    sample = cv2.GaussianBlur(sample,(3,3),0)
+    ## compute entropy and thresholding
     entropy = entropy_2d(sample)
-    ## TODO: implement threshold
     threshold_high = 0.043 * sample.shape[0] * sample.shape[1]
     if (entropy > 12.7) : threshold_high = 0.087 * sample.shape[0] * sample.shape[1]
     elif (entropy >= 10.8) : threshold_high = 0.065 * sample.shape[0] * sample.shape[1]
     if(args.threshold_high != None): threshold_high = args.threshold_high * sample.shape[0] * sample.shape[1]
-    # compute gradient and orientation, then find anchor points
+    ## compute gradient and orientation, then find anchor points
     grad_x = cv2.Sobel(sample, cv2.CV_64F, 1, 0, ksize=3)
     grad_y = cv2.Sobel(sample, cv2.CV_64F, 0, 1, ksize=3)
     cv2.normalize(grad_x, grad_x, -255, 255, cv2.NORM_MINMAX)
     cv2.normalize(grad_y, grad_y, -255, 255, cv2.NORM_MINMAX)
-    cv2.imwrite(os.path.join(output_folder, f"cannyGrad-{fname}"), np.sqrt(grad_x*grad_x + grad_y*grad_y))
-    cv2.imwrite(os.path.join(output_folder, f"orgGrad-{fname}"), (np.abs(grad_x) + np.abs(grad_y))/2)
     grad = gradFiltering((np.abs(grad_x) + np.abs(grad_y))/2)
-    cv2.imwrite(os.path.join(output_folder, f"filterGrad-{fname}"), grad)
     orientation = compute_gradient_orientation(grad_x, grad_y)
     anchors = find_anchor(grad, orientation)
-    if args.save_anchor:
+    if args.save_map:
         blank = np.zeros(grad.shape, dtype = np.uint8)
+        orientation_map = np.zeros((*grad.shape, 3), dtype = np.uint8)
         for ac in anchors:
-            blank[ac[0], ac[1]] = 255
-        # cv2.imwrite(os.path.join(output_folder, "anchor.png"), blank)
+            r, c = ac
+            blank[r, c] = 255
+            orientation_map[r, c] = DIRECTION.COLOR[orientation[r, c].astype(int)]
+        orientation_map = cv2.cvtColor(orientation_map, cv2.COLOR_RGB2BGR)
         cv2.imwrite(os.path.join(output_folder, f"anchor-{fname}"), blank)
-    # find edge points
-    edge_map = edge_linking(grad, orientation, anchors, args.threshold_low, threshold_high, save_partial=args.save_partial, save_path=args.output_path)
-    # cv2.imwrite(args.output_path, edge_map)
+        cv2.imwrite(os.path.join(output_folder, f"cannyGrad-{fname}"), np.sqrt(grad_x*grad_x + grad_y*grad_y))
+        cv2.imwrite(os.path.join(output_folder, f"orgGrad-{fname}"), (np.abs(grad_x) + np.abs(grad_y))/2)
+        cv2.imwrite(os.path.join(output_folder, f"filterGrad-{fname}"), grad)
+        cv2.imwrite(os.path.join(output_folder, f"orientation-{fname}"), orientation_map)
+        cv2.imwrite(os.path.join(output_folder, "color_sample.png"), DIRECTION.get_color_map_sample())
+        print('Save map finished')
+    ## find edge points
+    edge_map = edge_linking(grad, orientation, anchors, args.threshold_low, threshold_high, save_partial=args.save_partial, save_path=os.path.join(output_folder, f"edge_map-{fname}"))
     cv2.imwrite(os.path.join(output_folder, f"edge_map-{fname}"), edge_map)
     
 
